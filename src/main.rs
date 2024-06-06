@@ -3,7 +3,7 @@
 use axum::{
     extract::{Path, State},
     http::StatusCode,
-    routing::{get, patch},
+    routing::{delete, get, patch, post},
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
@@ -35,8 +35,10 @@ async fn main() {
     //Compose the routes
     let app: Router = Router::new()
         .route("/", get(|| async { "Hello world" }))
-        .route("task", get(get_tasks).post(create_task))
-        .route("task/:id", patch(update_task).delete(delete_task))
+        .route("/task", get(get_tasks))
+        .route("/task/create", post(create_task))
+        .route("/task/up/:id", patch(update_task))
+        .route("/task/del/:id", delete(delete_task))
         .with_state(db_pool);
 
     //Serve the application
@@ -47,26 +49,26 @@ async fn main() {
 
 #[derive(Serialize)]
 struct TaskRow {
-  task_id: i32,
-  name: String,
-  priority: Option<i32>,
+    task_id: i32,
+    name: String,
+    priority: Option<i32>,
 }
 
 #[derive(Deserialize)]
 struct CreateTaskReq {
-  name: String,
-  priority: Option<i32>,
+    name: String,
+    priority: Option<i32>,
 }
 
 #[derive(Serialize)]
 struct CreateTaskRow {
-  task_id: i32,
+    task_id: i32,
 }
 
 #[derive(Deserialize)]
 struct UpdateTaskReq {
-  name: Option<String>,
-  priority: Option<i32>,
+    name: Option<String>,
+    priority: Option<i32>,
 }
 
 async fn get_tasks(
@@ -118,14 +120,13 @@ async fn update_task(
     Path(task_id): Path<i32>,
     Json(task): Json<UpdateTaskReq>,
 ) -> Result<(StatusCode, String), (StatusCode, String)> {
-
     let mut query = "UPDATE tasks SET  task_id = $1".to_owned();
 
     let mut i = 2;
 
     if task.name.is_some() {
         query.push_str(&format!(" , name = ${i}"));
-        i = i+1;
+        i = i + 1;
     };
 
     if task.priority.is_some() {
@@ -134,24 +135,39 @@ async fn update_task(
 
     query.push_str(&format!("WHERE task_id = ${i}"));
 
+    let mut s = sqlx::query(&query).bind(task_id);
 
+    if task.name.is_some() {
+        s = s.bind(task.name);
+    }
 
-    sqlx::query!("
-    UPDATE tasks SET
-    name = $2
-    priority = $3,
-    WHERE task_id = $1
-    "
-    task.id, task.name, task.priority
-    )
-    .execute(&pg_pool)
-    .await
-    .map_err(|e| {
+    if task.priority.is_some() {
+        s = s.bind(task.priority);
+    }
+
+    s.execute(&pg_pool).await.map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
-            json!({"sucess:": false, "message": e.to_string}).to_string(),
+            json!({"sucess": false, "message": e.to_string()}).to_string(),
         )
     })?;
+
+    // sqlx::query!("
+    // UPDATE tasks SET
+    // name = $2
+    // priority = $3,
+    // WHERE task_id = $1
+    // "
+    // task.id, task.name, task.priority
+    // )
+    // .execute(&pg_pool)
+    // .await
+    // .map_err(|e| {
+    //     (
+    //         StatusCode::INTERNAL_SERVER_ERROR,
+    //         json!({"sucess:": false, "message": e.to_string()}).to_string(),
+    //     )
+    // })?;
 
     Ok((StatusCode::OK, json!({"sucess": true}).to_string()))
 }
