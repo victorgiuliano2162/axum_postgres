@@ -1,7 +1,5 @@
 #![allow(unused)]
 
-use core::task;
-
 use axum::{
     extract::{Path, State},
     http::StatusCode,
@@ -49,20 +47,26 @@ async fn main() {
 
 #[derive(Serialize)]
 struct TaskRow {
-    task_id: i32,
-    name: String,
-    priority: Option<i32>,
+  task_id: i32,
+  name: String,
+  priority: Option<i32>,
 }
 
 #[derive(Deserialize)]
 struct CreateTaskReq {
-    name: String,
-    priority: Option<i32>,
+  name: String,
+  priority: Option<i32>,
 }
 
 #[derive(Serialize)]
 struct CreateTaskRow {
   task_id: i32,
+}
+
+#[derive(Deserialize)]
+struct UpdateTaskReq {
+  name: Option<String>,
+  priority: Option<i32>,
 }
 
 async fn get_tasks(
@@ -85,20 +89,86 @@ async fn get_tasks(
 }
 
 async fn create_task(
-    State(pg_pool): State<PgPool>,
+    State(db_pool): State<PgPool>,
     Json(task): Json<CreateTaskReq>,
 ) -> Result<(StatusCode, String), (StatusCode, String)> {
-    sqlx::query_as!(CreateTaskRow, "INSERT INTO tasks (name, priority) VALUES ($1, $2) RETURNING task_id");
+    let row = sqlx::query_as!(
+        CreateTaskRow,
+        "INSERT INTO tasks (name, priority) VALUES ($1, $2) RETURNING task_id",
+        task.name,
+        task.priority
+    )
+    .fetch_one(&db_pool)
+    .await
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            json!({"success": false, "message": e.to_string()}).to_string(),
+        )
+    })?;
+
+    Ok((
+        StatusCode::CREATED,
+        json!({"success": true, "data": row}).to_string(),
+    ))
 }
 
 async fn update_task(
     State(pg_pool): State<PgPool>,
+    Path(task_id): Path<i32>,
+    Json(task): Json<UpdateTaskReq>,
 ) -> Result<(StatusCode, String), (StatusCode, String)> {
-    todo!();
+
+    let mut query = "UPDATE tasks SET  task_id = $1".to_owned();
+
+    let mut i = 2;
+
+    if task.name.is_some() {
+        query.push_str(&format!(" , name = ${i}"));
+        i = i+1;
+    };
+
+    if task.priority.is_some() {
+        query.push_str(&format!(", priority = ${i}"));
+    };
+
+    query.push_str(&format!("WHERE task_id = ${i}"));
+
+
+
+    sqlx::query!("
+    UPDATE tasks SET
+    name = $2
+    priority = $3,
+    WHERE task_id = $1
+    "
+    task.id, task.name, task.priority
+    )
+    .execute(&pg_pool)
+    .await
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            json!({"sucess:": false, "message": e.to_string}).to_string(),
+        )
+    })?;
+
+    Ok((StatusCode::OK, json!({"sucess": true}).to_string()))
 }
 
 async fn delete_task(
-    State(pg_pool): State<PgPool>,
+    State(db_pool): State<PgPool>,
+    Path(task_id): Path<i32>,
 ) -> Result<(StatusCode, String), (StatusCode, String)> {
-    todo!();
+    sqlx::query!("DELETE FROM tasks WHERE task_id = $1", task_id,)
+        .execute(&db_pool)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                json!({"success": false, "message": e.to_string()}).to_string(),
+            )
+        })?;
+
+    Ok((StatusCode::OK, json!({"success":true}).to_string()))
 }
