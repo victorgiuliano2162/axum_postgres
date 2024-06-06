@@ -1,5 +1,7 @@
 #![allow(unused)]
 
+use std::time::Duration;
+
 use axum::{
     extract::{Path, State},
     http::StatusCode,
@@ -21,7 +23,8 @@ async fn main() {
 
     //create database pool
     let db_pool = PgPoolOptions::new()
-        .max_connections(16)
+        .max_connections(64)
+        .acquire_timeout(Duration::from_secs(5))
         .connect(&database_url)
         .await
         .expect("Can't connect to database");
@@ -35,10 +38,8 @@ async fn main() {
     //Compose the routes
     let app: Router = Router::new()
         .route("/", get(|| async { "Hello world" }))
-        .route("/task", get(get_tasks))
-        .route("/task/create", post(create_task))
-        .route("/task/up/:id", patch(update_task))
-        .route("/task/del/:id", delete(delete_task))
+        .route("/tasks", get(get_tasks).post(create_task))
+        .route("/tasks/:task_id", patch(update_task).delete(delete_task))
         .with_state(db_pool);
 
     //Serve the application
@@ -120,12 +121,12 @@ async fn update_task(
     Path(task_id): Path<i32>,
     Json(task): Json<UpdateTaskReq>,
 ) -> Result<(StatusCode, String), (StatusCode, String)> {
-    let mut query = "UPDATE tasks SET  task_id = $1".to_owned();
+    let mut query = "UPDATE tasks SET task_id = $1".to_owned();
 
     let mut i = 2;
 
     if task.name.is_some() {
-        query.push_str(&format!(" , name = ${i}"));
+        query.push_str(&format!(", name = ${i}"));
         i = i + 1;
     };
 
@@ -133,7 +134,7 @@ async fn update_task(
         query.push_str(&format!(", priority = ${i}"));
     };
 
-    query.push_str(&format!("WHERE task_id = ${i}"));
+    query.push_str(&format!("WHERE task_id = $1"));
 
     let mut s = sqlx::query(&query).bind(task_id);
 
