@@ -24,7 +24,7 @@ async fn main() {
     //create database pool
     let db_pool = PgPoolOptions::new()
         .max_connections(64)
-        .acquire_timeout(Duration::from_secs(5))
+        .acquire_timeout(Duration::from_secs(64))
         .connect(&database_url)
         .await
         .expect("Can't connect to database");
